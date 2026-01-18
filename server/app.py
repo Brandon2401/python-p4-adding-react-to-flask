@@ -1,73 +1,54 @@
-from flask import Flask, request, make_response, jsonify
+# server/app.py
+
+from flask import Flask, jsonify, request
+from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
-from flask_migrate import Migrate
 
-from models import db, Message
-
+# Initialize app
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+CORS(app)  # Enable CORS so React can fetch from Flask
+
+# Configure database
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///chatterbox.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.json.compact = False
+db = SQLAlchemy(app)
 
-CORS(app)
-migrate = Migrate(app, db)
+# Models
+class Message(db.Model):
+    __tablename__ = 'messages'
 
-db.init_app(app)
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), nullable=False)
+    body = db.Column(db.String(500), nullable=False)
 
-@app.route('/messages', methods=['GET', 'POST'])
-def messages():
-    if request.method == 'GET':
-        messages = Message.query.order_by('created_at').all()
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "username": self.username,
+            "body": self.body
+        }
 
-        response = make_response(
-            jsonify([message.to_dict() for message in messages]),
-            200,
-        )
-    
-    elif request.method == 'POST':
-        data = request.get_json()
-        message = Message(
-            body=data['body'],
-            username=data['username']
-        )
+# Routes
+@app.route("/messages", methods=["GET"])
+def get_messages():
+    messages = Message.query.all()
+    return jsonify([msg.to_dict() for msg in messages])
 
-        db.session.add(message)
-        db.session.commit()
+@app.route("/messages", methods=["POST"])
+def create_message():
+    data = request.get_json()
+    username = data.get("username")
+    body = data.get("body")
+    if not username or not body:
+        return jsonify({"error": "username and body required"}), 400
 
-        response = make_response(
-            jsonify(message.to_dict()),
-            201,
-        )
+    message = Message(username=username, body=body)
+    db.session.add(message)
+    db.session.commit()
+    return jsonify(message.to_dict()), 201
 
-    return response
-
-@app.route('/messages/<int:id>', methods=['PATCH', 'DELETE'])
-def messages_by_id(id):
-    message = Message.query.filter_by(id=id).first()
-
-    if request.method == 'PATCH':
-        data = request.get_json()
-        for attr in data:
-            setattr(message, attr, data[attr])
-            
-        db.session.add(message)
-        db.session.commit()
-
-        response = make_response(
-            jsonify(message.to_dict()),
-            200,
-        )
-
-    elif request.method == 'DELETE':
-        db.session.delete(message)
-        db.session.commit()
-
-        response = make_response(
-            jsonify({'deleted': True}),
-            200,
-        )
-
-    return response
-
+# Run app
 if __name__ == "__main__":
-    app.run(port=5555)
+    with app.app_context():
+        db.create_all()  # Create tables inside app context
+    app.run(port=5555, debug=True)
